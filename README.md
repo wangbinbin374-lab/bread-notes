@@ -20,6 +20,28 @@
 - **数据备份**：所有数据只存在本机浏览器；可导出 / 导入 JSON 备份（包含照片）。
 - **离线可用**：Service Worker 缓存，可安装到手机主屏幕。
 
+## v3 新增
+
+- **拍照 / 截图识别配方**（「发现 → 拍照识别」，可一次选多张）：
+  - **本地 OCR**：Tesseract.js（chi_sim+eng，首次使用时从 jsDelivr CDN 懒加载约 20MB 语言包），离线隐私，但对手写、花字、复杂排版不准。
+  - **AI 识别（更准）**：任意 OpenAI 兼容视觉模型，先试 `/responses`（input_image），失败再退回 `/chat/completions`（image_url），要求严格 JSON。
+  - **必经确认页**：原图对照、低置信度原料标黄并说明原因、实时显示总重 / 面粉 / 水合 / 成本、百分比表可改面粉基数、同名配方提示「另存为 (2)」或覆盖。**不点确认，什么都不会保存。**
+- **AI 设置与隐私**：「我的 → AI 识别设置」默认接口 `https://api.0lll0.cn/v1`、模型 `gpt-5.5`。**API Key 只存在你这台设备的 localStorage，不写入仓库、不进导出备份。** 可点「测试连接」。
+  - ⚠️ 跨域（CORS）：实测该接口对 OPTIONS 预检返回 403、无 `Access-Control-Allow-Origin`，浏览器从 GitHub Pages 直连很可能被拦截，App 会给出明确提示；需要换一个支持 CORS 的接口或自建代理。
+- **烘焙记录最多 6 张照片**，可左右调整顺序（第 1 张为封面）、删除。
+- **分享卡片自动拼图**：可勾选要用的照片；1 张大图 / 2 张并排 / 3 张一大两小 / 4 张四宫格 / 5 张上二下三 / 6 张六宫格，每格居中裁切、圆角间隔，下方是配方名、比例和成本。
+- **发酵计时器**、配方倍数快捷键（0.5/1/1.5/2×）、记录环境温湿度、原料按 g/kg/ml/L/个 定价。
+- **小红书**：手机上先尝试打开 App（`xhsdiscover://` 深链，关键词已自动复制）；没打开就提示并给出可用的网页入口（小红书网页版首页 / 百度搜小红书笔记）。小红书网页搜索链接本身已失效，所以不再直接跳。
+- 左滑删除配方（iPhone Safari 已修复）：露出的「删除」是可点按钮；滑到底直接弹确认；点别处 / 滚动自动收起。
+
+## 致谢
+
+部分内容来自姊妹项目 **Handmade**（“面团在呼吸，时间在歌唱”）：发酵节奏小抄（水解 → 揉面 → 主发酵 → 折叠 → 松弛整形 → 最终发酵 → 烘烤）、发酵计时器的思路、记录环境温湿度、「手作基础面包」配方，以玻璃拟态风格重新实现。
+
+## iPhone 添加到主屏幕
+
+用 Safari 打开网址 → 点底部「分享」→「添加到主屏幕」。之后像 App 一样全屏、离线打开。
+
 ## 使用
 
 - 在线：部署后访问 `https://<你的用户名>.github.io/bread-notes/`
@@ -37,12 +59,15 @@
 index.html        入口页面
 css/style.css     样式（CSS 变量主题、深色模式）
 js/library.js     内置经典配方 + 默认原料价格
-js/store.js       数据层（localStorage + IndexedDB 照片、成本/比例计算、文本解析）
+js/calc.js        纯计算：成本 / 单位 / 比例 / 统计 / 配方文本解析 / 拼图布局（可在 node 中测试）
+js/store.js       数据层（localStorage + IndexedDB 照片、数据清洗）
 js/app.js         页面路由与界面逻辑、分享卡片、统计图表
 sw.js             Service Worker（离线缓存）
 manifest.json     PWA 清单
 icons/            应用图标
-tests/e2e.js      Playwright 端到端测试
+tests/*.test.js   node 单元测试（期望值手算）
+tests/e2e.js      Playwright 端到端测试（IPHONE=1 用 iPhone 13 触摸模拟）
+tests/e2e-swipe.js iPhone 左滑删除测试
 ```
 
 ## 测试
@@ -50,7 +75,8 @@ tests/e2e.js      Playwright 端到端测试
 ```bash
 python3 -m http.server 8765 &
 npm i playwright && npx playwright install chromium
-node tests/e2e.js
+node --test tests/
+node tests/e2e.js && IPHONE=1 node tests/e2e.js && node tests/e2e-swipe.js
 ```
 
 ## 注意
