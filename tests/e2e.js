@@ -6,7 +6,7 @@ const {chromium}=require('playwright');
  const U='http://localhost:8765/';await p.goto(U);await p.waitForTimeout(500);
  ok(await p.locator('.empty').isVisible(),'empty recipes view');
  // add library recipe
- await p.click('a[data-tab=discover]');await p.click('[data-add="0"]');await p.waitForTimeout(300);
+ await p.click('a[data-tab=discover]');await p.click('[data-add="0"]');await p.waitForTimeout(900);
  ok((await p.textContent('#rsum')).includes('%'),'library recipe added & detail shown');
  const h=await p.textContent('#rsum');ok(/6\d\.\d%|6\d%/.test(h),'toast hydration ~60s%: '+h);
  await p.fill('#tw','1000');ok((await p.textContent('#scaleInfo')).includes('1000g'),'scale by dough weight');
@@ -29,7 +29,7 @@ const {chromium}=require('playwright');
  // new recipe manual
  await p.goto(U+'#/recipe-edit/new');await p.fill('#fname','测试面包');await p.click('#saveR');await p.waitForTimeout(300);ok((await p.textContent('#title'))==='测试面包','manual recipe created');
  // stats
- await p.click('a[data-tab=stats]');ok(await p.locator('#chart svg').count()===1,'month chart');
+ await p.click('a[data-tab=stats]');await p.waitForSelector('#chart svg',{timeout:3000}).catch(()=>{});ok(await p.locator('#chart svg').count()===1,'month chart');
  for(const k of ['recipe','ing']){await p.click(`.seg [data-k=${k}]`);ok(await p.locator('#chart svg rect').count()>0,'chart '+k)}
  await p.screenshot({path:'/tmp/shots/stats.png',fullPage:true});
  // theme + price

@@ -7,9 +7,27 @@ const fx=(v,d=1)=>(Math.round(v*10**d)/10**d).toString();
 const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const stars=n=>'★'.repeat(n||0)+'☆'.repeat(5-(n||0));
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),1800)}
-function openModal(html){$('#sheet').innerHTML=html;$('#modal').hidden=false}
-function closeModal(){$('#modal').hidden=true;$('#sheet').innerHTML=''}
+function openModal(html){const m=$('#modal');m.classList.remove('closing');const sh=$('#sheet');sh.style.transform='';sh.innerHTML=html;sh.style.animation='none';sh.offsetHeight;sh.style.animation='';m.hidden=false;haptic()}
+function closeModal(){const m=$('#modal');if(m.hidden)return;if(REDUCED){m.hidden=true;$('#sheet').innerHTML='';return}m.classList.add('closing');setTimeout(()=>{m.hidden=true;m.classList.remove('closing');$('#sheet').innerHTML='';$('#sheet').style.transform=''},280)}
+window.closeModal=closeModal;
+// drag-to-dismiss bottom sheet
+(()=>{const sh=$('#sheet');let y0=null,dy=0,t0=0;
+ sh.addEventListener('touchstart',e=>{if(sh.scrollTop>0)return;y0=e.touches[0].clientY;dy=0;t0=Date.now()},{passive:true});
+ sh.addEventListener('touchmove',e=>{if(y0==null)return;dy=Math.max(0,e.touches[0].clientY-y0);if(dy>0){sh.style.transition='none';sh.style.transform=`translate3d(0,${dy}px,0)`}},{passive:true});
+ sh.addEventListener('touchend',()=>{if(y0==null)return;const v=dy/(Date.now()-t0);sh.style.transition='transform .45s var(--spring)';if(dy>120||v>.6){closeModal()}else sh.style.transform='';y0=null});})();
 $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()});
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
+function haptic(ms=8){try{navigator.vibrate&&navigator.vibrate(ms)}catch(e){}}
+document.addEventListener('click',e=>{if(e.target.closest('.btn,.tabbar a,.swatch,.seg button,.star-input button,.icon-btn'))haptic()},true);
+function countUp(el){el.querySelectorAll('[data-num]').forEach(n=>{const to=+n.dataset.num,from=+(n.dataset.prev||0),fmt=n.dataset.fmt;
+  const f=v=>fmt==='yuan'?yuan(v):fmt==='int'?String(Math.round(v)):fx(v)+'%';
+  if(REDUCED||from===to){n.textContent=f(to);return}const t0=performance.now(),D=650;
+  const step=t=>{const k=Math.min(1,(t-t0)/D),e=1-Math.pow(1-k,4);n.textContent=f(from+(to-from)*e);if(k<1)requestAnimationFrame(step)};requestAnimationFrame(step)})}
+const num=(v,fmt,prev)=>`<b data-num="${v}" data-fmt="${fmt}" data-prev="${prev??0}">${fmt==='yuan'?yuan(0):fmt==='int'?'0':'0%'}</b>`;
+function stagger(el){if(!el)return;el.classList.add('stagger');[...el.children].forEach((c,i)=>c.style.setProperty('--i',Math.min(i,12)))}
+function moveInd(){const a=document.querySelector('.tabbar a.on'),ind=$('.tab-ind');if(!ind)return;if(!a){ind.style.opacity=0;return}ind.style.opacity=1;ind.style.width=a.offsetWidth+'px';ind.style.transform=`translateX(${a.offsetLeft}px)`}
+window.addEventListener('resize',moveInd);
+function segInd(seg){const on=seg.querySelector('button.on');if(!on)return;let i=seg.querySelector('.seg-ind');if(!i){i=document.createElement('i');i.className='seg-ind';seg.prepend(i)}i.style.width=on.offsetWidth+'px';i.style.transform=`translateX(${on.offsetLeft-4}px)`}
 const recipe=id=>S.recipes.find(r=>r.id===id);
 function setHeader(title,back,action=''){$('#title').textContent=title;$('#backBtn').hidden=!back;$('#topAction').innerHTML=action;document.title=title+' · 面包手记'}
 $('#backBtn').onclick=()=>history.length>1?history.back():location.hash='#/recipes';
@@ -23,21 +41,40 @@ const PRESETS=[['麦香棕','#c8873a'],['可可','#7b4b2a'],['抹茶','#5a8f4e']
 
 // ---------- router ----------
 const routes=[];const route=(re,fn)=>routes.push([re,fn]);
-function render(){const h=location.hash.slice(1)||'/recipes';const [path,qs]=h.split('?');const q=new URLSearchParams(qs||'');
+const TABS=['recipes','bakes','discover','stats','me'];let lastPath='';
+const depth=p=>/^\/(recipe|bake-edit|recipe-edit)/.test(p)?(p.includes('edit')?2:1):0;
+const tabOf=p=>{const k=p.split('/')[1]||'';return k.startsWith('recipe')?'recipes':k.startsWith('bake')?'bakes':k};
+function render(){const h=location.hash.slice(1)||'/recipes';const path0=h.split('?')[0];
+  let dir=1;if(lastPath){const d1=depth(lastPath),d2=depth(path0);dir=d2!==d1?(d2>d1?1:-1):(TABS.indexOf(tabOf(path0))>=TABS.indexOf(tabOf(lastPath))?1:-1)}
+  const same=lastPath===path0;lastPath=path0;document.documentElement.style.setProperty('--dir',dir);
+  if(!same&&!REDUCED&&document.startViewTransition){document.startViewTransition(()=>doRender(h))}
+  else{doRender(h);if(!same&&!REDUCED){view.classList.remove('enter','back');view.offsetWidth;view.classList.add('enter');if(dir<0)view.classList.add('back')}}}
+function doRender(h){const [path,qs]=h.split('?');const q=new URLSearchParams(qs||'');
   document.querySelectorAll('.tabbar a').forEach(a=>a.classList.toggle('on',path.startsWith('/'+a.dataset.tab)||(a.dataset.tab==='recipes'&&path.startsWith('/recipe'))||(a.dataset.tab==='bakes'&&path.startsWith('/bake'))));
-  for(const [re,fn] of routes){const m=path.match(re);if(m){view.innerHTML='';window.scrollTo(0,0);try{fn(...m.slice(1),q)}catch(e){console.error(e);view.innerHTML='<div class="empty">出错了：'+esc(e.message)+'</div>'}return}}
+  moveInd();
+  for(const [re,fn] of routes){const m=path.match(re);if(m){view.innerHTML='';window.scrollTo(0,0);try{fn(...m.slice(1),q);countUp(view);view.querySelectorAll('.seg').forEach(segInd)}catch(e){console.error(e);view.innerHTML='<div class="empty">出错了：'+esc(e.message)+'</div>'}return}}
   location.hash='#/recipes'}
 window.addEventListener('hashchange',render);
+(()=>{let x0,y0,ok;view.addEventListener('touchstart',e=>{const t=e.target;ok=!t.closest('input,textarea,select,.swipe-wrap,.photos,svg,table,.sheet')&&depth(lastPath)===0;x0=e.touches[0].clientX;y0=e.touches[0].clientY},{passive:true});
+ view.addEventListener('touchend',e=>{if(!ok)return;const dx=e.changedTouches[0].clientX-x0,dy=e.changedTouches[0].clientY-y0;if(Math.abs(dx)<80||Math.abs(dy)>Math.abs(dx)*.6)return;
+  const i=TABS.indexOf(tabOf(lastPath))+(dx<0?1:-1);if(i>=0&&i<TABS.length){haptic(6);location.hash='#/'+TABS[i]}},{passive:true});})();
+function swipeDelete(wrap,onDelete){const card=wrap.querySelector('.card'),bg=wrap.querySelector('.swipe-del');let x0,y0,dx=0,mode=null;
+ card.addEventListener('touchstart',e=>{x0=e.touches[0].clientX;y0=e.touches[0].clientY;dx=0;mode=null},{passive:true});
+ card.addEventListener('touchmove',e=>{const mx=e.touches[0].clientX-x0,my=e.touches[0].clientY-y0;if(!mode)mode=Math.abs(mx)>Math.abs(my)+4?'x':Math.abs(my)>6?'y':null;if(mode!=='x')return;
+  dx=Math.min(0,mx);wrap.classList.add('dragging');card.style.transform=`translate3d(${dx<-140?-140+(dx+140)*.3:dx}px,0,0)`;bg.style.opacity=Math.min(1,-dx/110)},{passive:true});
+ card.addEventListener('touchend',()=>{wrap.classList.remove('dragging');if(mode==='x'){card._swiped=true;setTimeout(()=>card._swiped=false,50)}
+  if(dx<-110){haptic(15);card.style.transform='translate3d(-120px,0,0)';setTimeout(()=>{if(onDelete()===false){card.style.transform='';bg.style.opacity=0}},60)}else{card.style.transform='';bg.style.opacity=0}});}
 
 // ---------- recipes ----------
 route(/^\/recipes$/,()=>{
   setHeader('我的配方',false);
-  if(!S.recipes.length){view.innerHTML=`<div class="empty"><div>🍞</div><p>还没有配方</p><p class="row" style="justify-content:center"><a class="btn" href="#/recipe-edit/new">新建配方</a><a class="btn ghost" href="#/discover">从经典配方添加</a></p></div>`;}
-  else view.innerHTML=`<input id="q" placeholder="搜索配方…" style="margin-bottom:12px">`+'<div id="rl"></div>';
+  if(!S.recipes.length){view.innerHTML=`<div class="empty"><span class="mascot">🍞</span><b>面包篮还空空的～</b><p>先来一个配方吧，烤箱已经在等你啦 ✨</p><p class="row" style="justify-content:center"><a class="btn" href="#/recipe-edit/new">新建配方</a><a class="btn ghost" href="#/discover">从经典配方添加</a></p></div>`;}
+  else view.innerHTML=`<input id="q" placeholder="🔍 找找今天想烤哪一个…" style="margin-bottom:14px">`+'<div id="rl"></div>';
   const list=()=>{const k=($('#q')?.value||'').trim();const el=$('#rl');if(!el)return;
     el.innerHTML=S.recipes.filter(r=>!k||r.name.includes(k)).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).map(r=>{const c=calc(r);const n=S.bakes.filter(b=>b.recipeId===r.id).length;
-      return `<div class="card list-item" data-id="${r.id}"><div class="thumb" data-photo="${r.cover||''}">🍞</div><div class="grow"><b>${esc(r.name)}</b><div class="muted">面粉 ${fx(c.flour,0)}g · 水合 ${fx(c.hydration)}% · ${r.yieldCount||1} 个</div><div class="muted">成本 ${yuan(c.cost)} · 每个 ${yuan(c.perLoaf)} · 烤过 ${n} 次</div></div></div>`}).join('')||'<div class="empty">没有匹配的配方</div>';
-    el.querySelectorAll('[data-id]').forEach(d=>d.onclick=()=>location.hash='#/recipe/'+d.dataset.id);fillThumbs(el)};
+      return `<div class="swipe-wrap" data-wid="${r.id}"><div class="swipe-del">🗑 删除</div><div class="card list-item press" data-id="${r.id}"><div class="thumb" data-photo="${r.cover||''}">${EMO(r.name)}</div><div class="grow"><b>${esc(r.name)}</b><div class="muted">面粉 ${fx(c.flour,0)}g · 水合 ${fx(c.hydration)}% · ${r.yieldCount||1} 个</div><div class="muted">成本 ${yuan(c.cost)} · 每个 ${yuan(c.perLoaf)} · 烤过 ${n} 次</div></div><span class="muted" style="font-size:20px">›</span></div></div>`}).join('')||'<div class="empty"><span class="mascot">🥐</span><b>没找到呢</b>换个关键词试试？</div>';
+    el.querySelectorAll('[data-id]').forEach(d=>d.onclick=()=>{if(!d._swiped)location.hash='#/recipe/'+d.dataset.id});fillThumbs(el);stagger(el);
+    el.querySelectorAll('.swipe-wrap').forEach(w=>swipeDelete(w,()=>{const r=recipe(w.dataset.wid);if(!confirm(`删除配方「${r.name}」？`))return false;S.recipes=S.recipes.filter(x=>x.id!==r.id);save();toast('已删除，拜拜 👋');w.style.transition='opacity .25s';w.style.opacity=0;setTimeout(list,250)}))};
   $('#q')&&($('#q').oninput=list);list();
   view.insertAdjacentHTML('beforeend',`<a class="btn fab" href="#/recipe-edit/new" aria-label="新建配方">＋</a>`);
 });
@@ -46,11 +83,11 @@ async function fillThumbs(root){for(const el of root.querySelectorAll('[data-pho
 route(/^\/recipe\/([\w]+)$/,(id,q)=>{
   const r=recipe(id);if(!r)return location.hash='#/recipes';
   setHeader(r.name,true,`<a class="btn sm ghost" href="#/recipe-edit/${id}">编辑</a>`);
-  let scale=1;
+  let scale=1,prev={h:0,c:0,p:0},drawn=false;
   const draw=()=>{const c=calc(r,scale);
     $('#rtable').innerHTML=`<table><tr><th>原料</th><th class="n">克数</th><th class="n">烘焙%</th><th class="n">成本</th></tr>${c.rows.map(i=>`<tr><td>${esc(i.name)} ${i.isFlour?'<span class="tag">粉</span>':''}</td><td class="n">${fx(i.g)}</td><td class="n">${fx(i.pct)}%</td><td class="n">${i.priced?yuan(i.cost):'<span class="muted">未定价</span>'}</td></tr>`).join('')}
       <tr><td><b>合计</b></td><td class="n"><b>${fx(c.total,0)}</b></td><td class="n">${c.flour?fx(c.total/c.flour*100):0}%</td><td class="n"><b>${yuan(c.cost)}</b></td></tr></table>`;
-    $('#rsum').innerHTML=`<div class="stat"><b>${fx(c.hydration)}%</b>水合</div><div class="stat"><b>${yuan(c.cost)}</b>总成本</div><div class="stat"><b>${yuan(c.perLoaf)}</b>每个</div>`;
+    $('#rsum').innerHTML=`<div class="stat">${num(c.hydration,'pct',prev.h)}💧 水合</div><div class="stat">${num(c.cost,'yuan',prev.c)}💰 总成本</div><div class="stat">${num(c.perLoaf,'yuan',prev.p)}🍞 每个</div>`;prev={h:c.hydration,c:c.cost,p:c.perLoaf};if(drawn)countUp($('#rsum'));drawn=true;
     $('#rmiss').innerHTML=c.missing.length?`<div class="hint">以下原料未在价格库中定价：${c.missing.map(esc).join('、')}。<a href="#/me">去价格库添加</a></div>`:'';
     $('#scaleInfo').textContent=`缩放 ×${fx(scale,2)} · 面团 ${fx(c.total,0)}g · 每个约 ${fx(c.total/((+r.yieldCount||1)*scale),0)}g`;};
   const base=calc(r);
@@ -60,7 +97,7 @@ route(/^\/recipe\/([\w]+)$/,(id,q)=>{
   ${r.steps?`<div class="card"><h3>做法</h3><div style="white-space:pre-wrap">${esc(r.steps)}</div></div>`:''}
   ${r.source?`<div class="card"><h3>来源</h3><a href="${esc(r.source)}" target="_blank" rel="noopener" style="word-break:break-all;color:var(--primary)">${esc(r.source)}</a></div>`:''}
   <div class="row" style="margin-bottom:12px"><a class="btn" href="#/bake-edit/new?r=${id}">＋ 记录一次烘焙</a><button class="btn ghost" id="share">分享卡片</button><button class="btn ghost" id="dup">复制</button><button class="btn danger" id="del">删除</button></div>
-  <h3>烘焙记录</h3><div id="rbakes" class="timeline"></div>`;
+  <h3>🗓 烘焙记录</h3><div id="rbakes" class="timeline"></div>`;stagger(view);
   draw();
   $('#tw').oninput=e=>{const v=+e.target.value;$('#tn').value='';scale=v>0?v/base.total:1;draw()};
   $('#tn').oninput=e=>{const v=+e.target.value;$('#tw').value='';scale=v>0?v/(+r.yieldCount||1):1;draw()};
@@ -102,21 +139,21 @@ function ensurePrices(ings){ings.forEach(i=>{if(!Store.findPrice(i.name))S.price
 // ---------- bakes ----------
 route(/^\/bakes$/,()=>{
   setHeader('烘焙记录',false);
-  if(!S.bakes.length){view.innerHTML=`<div class="empty"><div>📒</div><p>还没有烘焙记录</p><p class="muted">在配方页点「记录一次烘焙」开始跟进</p></div>`;}
+  if(!S.bakes.length){view.innerHTML=`<div class="empty"><span class="mascot">🥯</span><b>还没有烘焙日记哦</b><p>每烤一次就记一笔，看着自己越烤越好吃 🥰</p></div>`;}
   else{view.innerHTML=`<select id="rf" style="margin-bottom:12px"><option value="">全部配方</option>${S.recipes.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select><div id="tl" class="timeline"></div>`;
     const draw=()=>renderTimeline($('#tl'),S.bakes.filter(b=>!$('#rf').value||b.recipeId===$('#rf').value));$('#rf').onchange=draw;draw()}
   if(S.recipes.length)view.insertAdjacentHTML('beforeend',`<a class="btn fab" href="#/bake-edit/new" aria-label="新记录">＋</a>`);
 });
 function renderTimeline(el,bakes){
   bakes=[...bakes].sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(b.createdAt-a.createdAt));
-  if(!bakes.length){el.innerHTML='<p class="muted">暂无记录</p>';return}
+  if(!bakes.length){el.innerHTML='<p class="muted">还没烤过这个，快去试试吧 🔥</p>';return}
   el.innerHTML=bakes.map(b=>{const r=recipe(b.recipeId);return `<div class="card tl-item"><div class="row between"><b>${esc(r?r.name:b.recipeName||'已删除的配方')}</b><span class="muted">${esc(b.date)}</span></div>
    <div class="stars">${stars(b.rating)}</div>
    <div class="muted">${b.ovenTemp?`🔥 ${esc(b.ovenTemp)}℃ `:''}${b.ovenTime?`⏱ ${esc(b.ovenTime)} 分钟 `:''}${b.scale&&b.scale!=1?`· ×${fx(b.scale,2)} `:''}· 花费 ${yuan(b.cost)}</div>
    ${b.ferment?`<div class="small"><b>发酵：</b>${esc(b.ferment)}</div>`:''}${b.notes?`<div style="white-space:pre-wrap">${esc(b.notes)}</div>`:''}
    <div class="photos">${(b.photos||[]).map(p=>`<img data-pid="${p}" alt="">`).join('')}</div>
    <div class="row" style="margin-top:8px"><a class="btn sm ghost" href="#/bake-edit/${b.id}">编辑</a><button class="btn sm ghost" data-share="${b.id}">分享</button><button class="btn sm danger" data-del="${b.id}">删除</button></div></div>`}).join('');
-  el.querySelectorAll('img[data-pid]').forEach(async im=>{im.src=await photoURL(im.dataset.pid);im.onclick=()=>openModal(`<img src="${im.src}" style="width:100%;border-radius:12px"><button class="btn block" style="margin-top:10px" onclick="document.getElementById('modal').hidden=true">关闭</button>`)});
+  stagger(el);el.querySelectorAll('img[data-pid]').forEach(async im=>{im.src=await photoURL(im.dataset.pid);im.onclick=()=>openModal(`<img src="${im.src}" style="width:100%;border-radius:12px"><button class="btn block" style="margin-top:10px" onclick="closeModal()">关闭</button>`)});
   el.querySelectorAll('[data-share]').forEach(x=>x.onclick=()=>{const b=S.bakes.find(y=>y.id===x.dataset.share);shareCard({recipe:recipe(b.recipeId),bake:b})});
   el.querySelectorAll('[data-del]').forEach(x=>x.onclick=async()=>{if(!confirm('删除这条记录？'))return;const b=S.bakes.find(y=>y.id===x.dataset.del);for(const p of b.photos||[])await Photos.del(p);S.bakes.splice(S.bakes.indexOf(b),1);save();render()});
 }
@@ -187,7 +224,7 @@ route(/^\/discover$/,()=>{
    <label>配方名称</label><input id="iname" placeholder="自动识别或手动填写">
    <label>用料文字</label><textarea id="itext" rows="6" placeholder="高筋面粉 250g&#10;水 170克&#10;盐：5g&#10;鸡蛋 1个"></textarea>
    <button class="btn block" id="iparse" style="margin-top:10px">识别并创建配方</button></div>
-   <h3>经典配方</h3><div id="lib"></div>`;
+   <h3>📚 经典配方 · 一键收藏</h3><div id="lib"></div>`;
   view.querySelectorAll('[data-site]').forEach(b=>b.onclick=()=>{const k=encodeURIComponent($('#kw').value.trim()||'面包');
     window.open(b.dataset.site==='xcf'?`https://www.xiachufang.com/search/?keyword=${k}`:`https://www.xiaohongshu.com/search_result?keyword=${k}`,'_blank','noopener')});
   $('#iparse').onclick=()=>{let text=$('#itext').value;let url=$('#iurl').value.trim();const m=text.match(/https?:\/\/\S+/);if(!url&&m)url=m[0];
@@ -196,9 +233,9 @@ route(/^\/discover$/,()=>{
     let name=$('#iname').value.trim();if(!name){const first=text.split('\n').map(s=>s.trim()).find(s=>s&&!/\d/.test(s)&&!/^https?:/.test(s)&&s.length<=20);name=first||'导入的配方'}
     window._draft={name,yieldCount:1,ingredients:ings,source:url,steps:text.split('\n').filter(l=>!Store.parseIngredients(l).length&&!/^https?:/.test(l.trim())).join('\n').trim()};
     toast(`识别到 ${ings.length} 种原料，请确认`);location.hash='#/recipe-edit/new'};
-  $('#lib').innerHTML=BREAD_LIBRARY.map((l,k)=>{const r=libToRecipe(l);const c=calc(r);return `<div class="card"><div class="row between"><div class="grow"><b>${esc(l.name)}</b><div class="muted">面粉 ${c.flour}g · 水合 ${fx(c.hydration)}% · ${l.yieldCount} 个 · 约 ${yuan(c.cost)}</div></div><button class="btn sm" data-add="${k}">加入</button></div>
+  $('#lib').innerHTML=BREAD_LIBRARY.map((l,k)=>{const r=libToRecipe(l);const c=calc(r);return `<div class="card press"><div class="row between"><div class="grow"><b>${EMO(l.name)} ${esc(l.name)}</b><div class="muted">面粉 ${c.flour}g · 水合 ${fx(c.hydration)}% · ${l.yieldCount} 个 · 约 ${yuan(c.cost)}</div></div><button class="btn sm" data-add="${k}">加入</button></div>
    <details><summary class="muted small" style="margin-top:6px;cursor:pointer">查看配比与做法</summary><p class="small">${r.ingredients.map(i=>`${esc(i.name)} ${i.grams}g (${fx(i.grams/c.flour*100)}%)`).join('、')}</p><div class="small" style="white-space:pre-wrap">${esc(l.steps)}</div></details></div>`}).join('');
-  view.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{const r=libToRecipe(BREAD_LIBRARY[b.dataset.add]);r.id=uid();r.createdAt=r.updatedAt=Date.now();S.recipes.push(r);ensurePrices(r.ingredients);save();toast('已加入我的配方');location.hash='#/recipe/'+r.id});
+  stagger($('#lib'));view.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{const r=libToRecipe(BREAD_LIBRARY[b.dataset.add]);r.id=uid();r.createdAt=r.updatedAt=Date.now();S.recipes.push(r);ensurePrices(r.ingredients);save();toast('收进面包篮啦 🧺');location.hash='#/recipe/'+r.id});
 });
 function libToRecipe(l){return {name:l.name,yieldCount:l.yieldCount,steps:l.steps,source:'',ingredients:l.ing.map(([name,grams,f])=>({name,grams,isFlour:!!f}))}}
 
@@ -208,12 +245,12 @@ route(/^\/stats$/,()=>{
   setHeader('费用统计',false);
   const bakes=S.bakes;const total=bakes.reduce((a,b)=>a+(b.cost||0),0);
   const ym=today().slice(0,7);const thisMonth=bakes.filter(b=>(b.date||'').startsWith(ym)).reduce((a,b)=>a+(b.cost||0),0);
-  view.innerHTML=`<div class="stats"><div class="stat"><b>${yuan(total)}</b>累计花费</div><div class="stat"><b>${yuan(thisMonth)}</b>本月</div><div class="stat"><b>${bakes.length}</b>烘焙次数</div></div>
+  view.innerHTML=`<div class="stats"><div class="stat">${num(total,'yuan')}累计花费</div><div class="stat">${num(thisMonth,'yuan')}本月</div><div class="stat">${num(bakes.length,'int')}烘焙次数</div></div>
    <div class="seg">${[['month','按月'],['recipe','按配方'],['ing','按原料']].map(([k,t])=>`<button data-k="${k}" class="${k===statTab?'on':''}">${t}</button>`).join('')}</div>
    <div class="card" id="chart"></div><div class="card" id="stable"></div>
    <p class="muted small">统计基于烘焙记录（每次记录按当时价格库计算原料花费）。</p>`;
-  view.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{statTab=b.dataset.k;render()});
-  if(!bakes.length){$('#chart').innerHTML='<div class="empty"><div>📊</div>记录烘焙后这里会显示花费统计</div>';$('#stable').remove();return}
+  view.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{statTab=b.dataset.k;b.parentNode.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));segInd(b.parentNode);setTimeout(()=>doRender(location.hash.slice(1)),REDUCED?0:220)});
+  if(!bakes.length){$('#chart').innerHTML='<div class="empty"><span class="mascot">📊</span><b>账本还是空白的</b>记录几次烘焙，这里就会长出小柱子 🌱</div>';$('#stable').remove();return}
   const agg={};const add=(k,v,n=1)=>{agg[k]=agg[k]||{v:0,n:0};agg[k].v+=v;agg[k].n+=n};
   if(statTab==='month'){const ms=[];const d=new Date();for(let i=11;i>=0;i--){const t=new Date(d.getFullYear(),d.getMonth()-i,1);ms.push(`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`)}
     ms.forEach(m=>agg[m]={v:0,n:0});bakes.forEach(b=>add((b.date||'').slice(0,7),b.cost||0))}
@@ -226,22 +263,22 @@ route(/^\/stats$/,()=>{
   $('#stable').innerHTML=`<table><tr><th>${statTab==='month'?'月份':statTab==='recipe'?'配方':'原料'}</th><th class="n">${statTab==='ing'?'出现':'次数'}</th><th class="n">花费</th><th class="n">占比</th></tr>${items.filter(([,o])=>o.n).map(([k,o])=>`<tr><td>${esc(k)}</td><td class="n">${o.n}</td><td class="n">${yuan(o.v)}</td><td class="n">${fx(o.v/sum*100)}%</td></tr>`).join('')}</table>`;
 });
 function barChart(data){const W=340,H=180,max=Math.max(...data.map(d=>d[1]),1),bw=W/data.length;
-  return `<svg class="chart" viewBox="0 0 ${W} ${H+30}">${data.map(([l,v],i)=>{const h=v/max*H;return `<rect x="${i*bw+4}" y="${H-h+10}" width="${bw-8}" height="${h}" rx="4" fill="var(--primary)" opacity="${v?1:.25}"/>${v?`<text x="${i*bw+bw/2}" y="${H-h+6}" font-size="8" text-anchor="middle" fill="var(--muted)">${Math.round(v)}</text>`:''}<text x="${i*bw+bw/2}" y="${H+24}" font-size="9" text-anchor="middle" fill="var(--muted)">${l}</text>`}).join('')}</svg>`}
+  return `<svg class="chart" viewBox="0 0 ${W} ${H+30}">${data.map(([l,v],i)=>{const h=v/max*H;return ` <rect class="bar" style="--i:${i}" x="${i*bw+4}" y="${H-h+10}" width="${bw-8}" height="${h}" rx="7" fill="var(--primary)" opacity="${v?1:.25}"/>${v?`<text x="${i*bw+bw/2}" y="${H-h+6}" font-size="8" text-anchor="middle" fill="var(--muted)">${Math.round(v)}</text>`:''}<text x="${i*bw+bw/2}" y="${H+24}" font-size="9" text-anchor="middle" fill="var(--muted)">${l}</text>`}).join('')}</svg>`}
 function hbarChart(data){const W=340,rh=26,max=Math.max(...data.map(d=>d[1]),1);
-  return `<svg class="chart" viewBox="0 0 ${W} ${data.length*rh+4}">${data.map(([l,v],i)=>`<text x="0" y="${i*rh+17}" font-size="11" fill="var(--text)">${esc(l.slice(0,7))}</text><rect x="90" y="${i*rh+5}" width="${Math.max(2,v/max*190)}" height="16" rx="4" fill="var(--primary)"/><text x="${96+v/max*190}" y="${i*rh+17}" font-size="10" fill="var(--muted)">${yuan(v)}</text>`).join('')}</svg>`}
+  return `<svg class="chart" viewBox="0 0 ${W} ${data.length*rh+4}">${data.map(([l,v],i)=>`<text x="0" y="${i*rh+17}" font-size="11" fill="var(--text)">${esc(l.slice(0,7))}</text><rect class="hbar" style="--i:${i}" x="90" y="${i*rh+5}" width="${Math.max(2,v/max*190)}" height="16" rx="8" fill="var(--primary)"/><text x="${96+v/max*190}" y="${i*rh+17}" font-size="10" fill="var(--muted)">${yuan(v)}</text>`).join('')}</svg>`}
 
 // ---------- me ----------
 route(/^\/me$/,()=>{
   setHeader('我的',false);
-  view.innerHTML=`<div class="card"><h3>主题色</h3><div class="swatches">${PRESETS.map(([n,c])=>`<button class="swatch ${S.settings.theme===c?'on':''}" style="background:${c}" title="${n}" data-c="${c}"></button>`).join('')}
+  view.innerHTML=`<div class="card"><h3>🎨 主题色</h3><div class="swatches">${PRESETS.map(([n,c])=>`<button class="swatch ${S.settings.theme===c?'on':''}" style="background:${c}" title="${n}" data-c="${c}"></button>`).join('')}
    <label class="swatch" style="margin:0;background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);position:relative" title="自定义"><input type="color" id="cc" value="${S.settings.theme}" style="opacity:0;position:absolute;inset:0;width:100%;height:100%"></label></div>
    <label>外观</label><div class="seg" id="mode">${[['auto','跟随系统'],['light','浅色'],['dark','深色']].map(([k,t])=>`<button data-m="${k}" class="${S.settings.mode===k?'on':''}">${t}</button>`).join('')}</div></div>
-   <div class="card"><div class="row between"><h3>原料价格库</h3><button class="btn sm" id="addP">＋ 添加</button></div><p class="muted small">填写购买价和包装规格，自动算出每克成本，所有配方共用。</p><input id="pq" placeholder="搜索原料" style="margin-bottom:8px"><div id="plist"></div></div>
-   <div class="card"><h3>数据备份</h3><p class="muted small">数据只保存在本机浏览器中。建议定期导出备份（含照片）。</p><div class="row"><button class="btn" id="exp">导出 JSON</button><label class="btn ghost" style="margin:0;color:var(--primary)">导入 JSON<input type="file" id="imp" accept="application/json,.json" hidden></label><button class="btn danger" id="clr">清空数据</button></div></div>
-   <p class="muted small" style="text-align:center">面包手记 · 开源免费 · 数据不上传任何服务器</p>`;
-  view.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>{S.settings.theme=b.dataset.c;save();applyTheme();render()});
-  $('#cc').onchange=e=>{S.settings.theme=e.target.value;save();applyTheme();render()};
-  $('#mode').onclick=e=>{if(e.target.dataset.m){S.settings.mode=e.target.dataset.m;save();applyTheme();render()}};
+   <div class="card"><div class="row between"><h3>🧂 原料价格库</h3><button class="btn sm" id="addP">＋ 添加</button></div><p class="muted small">填写购买价和包装规格，自动算出每克成本，所有配方共用。</p><input id="pq" placeholder="搜索原料" style="margin-bottom:8px"><div id="plist"></div></div>
+   <div class="card"><h3>💾 数据备份</h3><p class="muted small">数据只保存在本机浏览器中。建议定期导出备份（含照片）。</p><div class="row"><button class="btn" id="exp">导出 JSON</button><label class="btn ghost" style="margin:0;color:var(--primary)">导入 JSON<input type="file" id="imp" accept="application/json,.json" hidden></label><button class="btn danger" id="clr">清空数据</button></div></div>
+   <p class="muted small" style="text-align:center">🍞 面包手记 · 开源免费 · 数据只住在你的手机里</p>`;stagger(view);
+  view.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>{S.settings.theme=b.dataset.c;save();applyTheme();view.querySelectorAll('.swatch').forEach(x=>x.classList.toggle('on',x===b))});
+  $('#cc').oninput=e=>{S.settings.theme=e.target.value;applyTheme()};$('#cc').onchange=e=>{S.settings.theme=e.target.value;save();applyTheme()};
+  $('#mode').onclick=e=>{const b=e.target.closest('[data-m]');if(b){S.settings.mode=b.dataset.m;save();applyTheme();$('#mode').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));segInd($('#mode'))}};
   const plist=()=>{const k=$('#pq').value.trim();$('#plist').innerHTML=`<table><tr><th>原料</th><th class="n">价格/规格</th><th class="n">每100g</th></tr>${S.prices.filter(p=>!k||p.name.includes(k)).sort((a,b)=>(a.size>0)-(b.size>0)).map(p=>`<tr data-p="${p.id}" style="cursor:pointer"><td>${esc(p.name)}</td><td class="n">${p.size>0?`${yuan(p.price)} / ${p.size}g`:'<span class="tag">未定价</span>'}</td><td class="n">${p.size>0?yuan(p.price/p.size*100):'-'}</td></tr>`).join('')}</table>`;
     $('#plist').querySelectorAll('[data-p]').forEach(t=>t.onclick=()=>editPrice(S.prices.find(p=>p.id===t.dataset.p),plist))};
   $('#pq').oninput=plist;plist();$('#addP').onclick=()=>editPrice(null,plist);
@@ -267,7 +304,8 @@ async function importData(file){if(!file)return;try{const j=JSON.parse(await fil
 async function putWithId(id,blob){const req=indexedDB.open('breadnotes',1);const d=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error)});
   await new Promise((res,rej)=>{const t=d.transaction('photos','readwrite');t.objectStore('photos').put(blob,id);t.oncomplete=res;t.onerror=()=>rej(t.error)});d.close()}
 
-render();
+const EMO=n=>/吐司|布里欧/.test(n)?'🍞':/贝果/.test(n)?'🥯':/可颂|牛角/.test(n)?'🥐':/法棍|长棍/.test(n)?'🥖':/肉桂|卷/.test(n)?'🌀':/餐包|小面包/.test(n)?'🧁':/全麦|黑麦|欧包|乡村|恰巴塔/.test(n)?'🌾':'🍞';
+render();requestAnimationFrame(moveInd);
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 window.BreadApp={shareCard,render};
 })();
